@@ -37,7 +37,7 @@
 
 struct dsmark_qdisc_data {
 	struct Qdisc		*q;
-	struct tcf_proto	*filter_list;
+	struct tcf_proto __rcu	*filter_list;
 	u8			*mask;	/* "owns" the array */
 	u8			*value;
 	u16			indices;
@@ -228,7 +228,8 @@ static int dsmark_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		skb->tc_index = TC_H_MIN(skb->priority);
 	else {
 		struct tcf_result res;
-		int result = tc_classify(skb, p->filter_list, &res);
+		struct tcf_proto *fl = rcu_dereference_bh(p->filter_list);
+		int result = tc_classify(skb, fl, &res);
 
 		pr_debug("result %d class 0x%04x\n", result, res.classid);
 
@@ -403,10 +404,11 @@ static void dsmark_reset(struct Qdisc *sch)
 static void dsmark_destroy(struct Qdisc *sch)
 {
 	struct dsmark_qdisc_data *p = qdisc_priv(sch);
+	struct tcf_proto *fl = rtnl_dereference(p->filter_list);
 
 	pr_debug("dsmark_destroy(sch %p,[qdisc %p])\n", sch, p);
 
-	tcf_destroy_chain(&p->filter_list);
+	tcf_destroy_chain(&fl);
 	qdisc_destroy(p->q);
 	kfree(p->mask);
 }

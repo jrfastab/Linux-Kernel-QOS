@@ -58,7 +58,7 @@ struct choke_sched_data {
 
 /* Variables */
 	struct red_vars  vars;
-	struct tcf_proto *filter_list;
+	struct tcf_proto __rcu *filter_list;
 	struct {
 		u32	prob_drop;	/* Early probability drops */
 		u32	prob_mark;	/* Early probability marks */
@@ -200,9 +200,11 @@ static bool choke_classify(struct sk_buff *skb,
 {
 	struct choke_sched_data *q = qdisc_priv(sch);
 	struct tcf_result res;
+	struct tcf_proto *fl;
 	int result;
 
-	result = tc_classify(skb, q->filter_list, &res);
+	fl = rcu_dereference_bh(q->filter_list);
+	result = tc_classify(skb, fl, &res);
 	if (result >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -251,12 +253,14 @@ static bool choke_match_random(const struct choke_sched_data *q,
 			       unsigned int *pidx)
 {
 	struct sk_buff *oskb;
+	struct tcf_proto *fl;
 
 	if (q->head == q->tail)
 		return false;
 
 	oskb = choke_peek_random(q, pidx);
-	if (q->filter_list)
+	fl = rcu_dereference_bh(q->filter_list);
+	if (fl)
 		return choke_get_classid(nskb) == choke_get_classid(oskb);
 
 	return choke_match_flow(oskb, nskb);
@@ -266,9 +270,11 @@ static int choke_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct choke_sched_data *q = qdisc_priv(sch);
 	const struct red_parms *p = &q->parms;
+	struct tcf_proto *fl;
 	int ret = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 
-	if (q->filter_list) {
+	fl = rcu_dereference_bh(q->filter_list);
+	if (fl) {
 		/* If using external classifiers, get result and record it. */
 		if (!choke_classify(skb, sch, &ret))
 			goto other_drop;	/* Packet was eaten by filter */
@@ -540,8 +546,10 @@ static int choke_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 static void choke_destroy(struct Qdisc *sch)
 {
 	struct choke_sched_data *q = qdisc_priv(sch);
+	struct tcf_proto *fl;
 
-	tcf_destroy_chain(&q->filter_list);
+	fl = rtnl_dereference(q->filter_list);
+	tcf_destroy_chain(&fl);
 	choke_free(q->tab);
 }
 

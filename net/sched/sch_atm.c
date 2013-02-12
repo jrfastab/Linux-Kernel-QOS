@@ -41,7 +41,7 @@
 
 struct atm_flow_data {
 	struct Qdisc		*q;	/* FIFO, TBF, etc. */
-	struct tcf_proto	*filter_list;
+	struct tcf_proto __rcu	*filter_list;
 	struct atm_vcc		*vcc;	/* VCC; NULL if VCC is closed */
 	void			(*old_pop)(struct atm_vcc *vcc,
 					   struct sk_buff *skb); /* chaining */
@@ -134,6 +134,7 @@ static void atm_tc_put(struct Qdisc *sch, unsigned long cl)
 {
 	struct atm_qdisc_data *p = qdisc_priv(sch);
 	struct atm_flow_data *flow = (struct atm_flow_data *)cl;
+	struct tcf_proto *fl;
 
 	pr_debug("atm_tc_put(sch %p,[qdisc %p],flow %p)\n", sch, p, flow);
 	if (--flow->ref)
@@ -142,7 +143,10 @@ static void atm_tc_put(struct Qdisc *sch, unsigned long cl)
 	list_del_init(&flow->list);
 	pr_debug("atm_tc_put: qdisc %p\n", flow->q);
 	qdisc_destroy(flow->q);
-	tcf_destroy_chain(&flow->filter_list);
+
+	fl = rtnl_dereference(flow->filter_list);
+	tcf_destroy_chain(&fl);
+
 	if (flow->sock) {
 		pr_debug("atm_tc_put: f_count %ld\n",
 			file_count(flow->sock->file));
@@ -273,7 +277,7 @@ static int atm_tc_change(struct Qdisc *sch, u32 classid, u32 parent,
 		error = -ENOBUFS;
 		goto err_out;
 	}
-	flow->filter_list = NULL;
+	rcu_assign_pointer(flow->filter_list, NULL);
 	flow->q = qdisc_create_dflt(sch->dev_queue, &pfifo_qdisc_ops, classid);
 	if (!flow->q)
 		flow->q = &noop_qdisc;
@@ -311,7 +315,7 @@ static int atm_tc_delete(struct Qdisc *sch, unsigned long arg)
 	pr_debug("atm_tc_delete(sch %p,[qdisc %p],flow %p)\n", sch, p, flow);
 	if (list_empty(&flow->list))
 		return -EINVAL;
-	if (flow->filter_list || flow == &p->link)
+	if (rtnl_dereference(flow->filter_list) || flow == &p->link)
 		return -EBUSY;
 	/*
 	 * Reference count must be 2: one for "keepalive" (set at class
@@ -369,11 +373,12 @@ static int atm_tc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	flow = NULL;
 	if (TC_H_MAJ(skb->priority) != sch->handle ||
 	    !(flow = (struct atm_flow_data *)atm_tc_get(sch, skb->priority))) {
+		struct tcf_proto *fl;
+
 		list_for_each_entry(flow, &p->flows, list) {
-			if (flow->filter_list) {
-				result = tc_classify_compat(skb,
-							    flow->filter_list,
-							    &res);
+			fl = rcu_dereference_bh(flow->filter_list);
+			if (fl) {
+				result = tc_classify_compat(skb, fl, &res);
 				if (result < 0)
 					continue;
 				flow = (struct atm_flow_data *)res.class;
@@ -544,7 +549,7 @@ static int atm_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	if (!p->link.q)
 		p->link.q = &noop_qdisc;
 	pr_debug("atm_tc_init: link (%p) qdisc %p\n", &p->link, p->link.q);
-	p->link.filter_list = NULL;
+	rcu_assign_pointer(p->link.filter_list, NULL);
 	p->link.vcc = NULL;
 	p->link.sock = NULL;
 	p->link.classid = sch->handle;
@@ -568,10 +573,13 @@ static void atm_tc_destroy(struct Qdisc *sch)
 {
 	struct atm_qdisc_data *p = qdisc_priv(sch);
 	struct atm_flow_data *flow, *tmp;
+	struct tcf_proto *fl;
 
 	pr_debug("atm_tc_destroy(sch %p,[qdisc %p])\n", sch, p);
-	list_for_each_entry(flow, &p->flows, list)
-		tcf_destroy_chain(&flow->filter_list);
+	list_for_each_entry(flow, &p->flows, list) {
+		fl = rtnl_dereference(flow->filter_list);
+		tcf_destroy_chain(&fl);
+	}
 
 	list_for_each_entry_safe(flow, tmp, &p->flows, list) {
 		if (flow->ref > 1)

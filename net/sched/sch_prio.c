@@ -24,7 +24,7 @@
 
 struct prio_sched_data {
 	int bands;
-	struct tcf_proto *filter_list;
+	struct tcf_proto __rcu *filter_list;
 	u8  prio2band[TC_PRIO_MAX+1];
 	struct Qdisc *queues[TCQ_PRIO_BANDS];
 };
@@ -36,11 +36,13 @@ prio_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 	struct prio_sched_data *q = qdisc_priv(sch);
 	u32 band = skb->priority;
 	struct tcf_result res;
+	struct tcf_proto *fl;
 	int err;
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 	if (TC_H_MAJ(skb->priority) != sch->handle) {
-		err = tc_classify(skb, q->filter_list, &res);
+		fl = rcu_dereference_bh(q->filter_list);
+		err = tc_classify(skb, fl, &res);
 #ifdef CONFIG_NET_CLS_ACT
 		switch (err) {
 		case TC_ACT_STOLEN:
@@ -50,7 +52,7 @@ prio_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 			return NULL;
 		}
 #endif
-		if (!q->filter_list || err < 0) {
+		if (!fl || err < 0) {
 			if (TC_H_MAJ(band))
 				band = 0;
 			return q->queues[q->prio2band[band & TC_PRIO_MAX]];
@@ -157,8 +159,9 @@ prio_destroy(struct Qdisc *sch)
 {
 	int prio;
 	struct prio_sched_data *q = qdisc_priv(sch);
+	struct tcf_proto *fl = rtnl_dereference(q->filter_list);
 
-	tcf_destroy_chain(&q->filter_list);
+	tcf_destroy_chain(&fl);
 	for (prio = 0; prio < q->bands; prio++)
 		qdisc_destroy(q->queues[prio]);
 }

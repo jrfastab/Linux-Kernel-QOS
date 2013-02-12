@@ -32,7 +32,7 @@ struct multiq_sched_data {
 	u16 bands;
 	u16 max_bands;
 	u16 curband;
-	struct tcf_proto *filter_list;
+	struct tcf_proto __rcu *filter_list;
 	struct Qdisc **queues;
 };
 
@@ -43,10 +43,11 @@ multiq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 	struct multiq_sched_data *q = qdisc_priv(sch);
 	u32 band;
 	struct tcf_result res;
+	struct tcf_proto *fl = rcu_dereference_bh(q->filter_list);
 	int err;
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	err = tc_classify(skb, q->filter_list, &res);
+	err = tc_classify(skb, fl, &res);
 #ifdef CONFIG_NET_CLS_ACT
 	switch (err) {
 	case TC_ACT_STOLEN:
@@ -189,8 +190,9 @@ multiq_destroy(struct Qdisc *sch)
 {
 	int band;
 	struct multiq_sched_data *q = qdisc_priv(sch);
+	struct tcf_proto *fl = rtnl_dereference(q->filter_list);
 
-	tcf_destroy_chain(&q->filter_list);
+	tcf_destroy_chain(&fl);
 	for (band = 0; band < q->bands; band++)
 		qdisc_destroy(q->queues[band]);
 

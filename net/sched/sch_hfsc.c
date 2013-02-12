@@ -116,7 +116,7 @@ struct hfsc_class {
 	struct gnet_stats_queue qstats;
 	struct gnet_stats_rate_est64 rate_est;
 	unsigned int	level;		/* class level in hierarchy */
-	struct tcf_proto *filter_list;	/* filter list */
+	struct tcf_proto __rcu *filter_list; /* filter list */
 	unsigned int	filter_cnt;	/* filter count */
 
 	struct hfsc_sched *sched;	/* scheduler data */
@@ -1110,8 +1110,10 @@ static void
 hfsc_destroy_class(struct Qdisc *sch, struct hfsc_class *cl)
 {
 	struct hfsc_sched *q = qdisc_priv(sch);
+	struct tcf_proto *fl;
 
-	tcf_destroy_chain(&cl->filter_list);
+	fl = rtnl_dereference(cl->filter_list);
+	tcf_destroy_chain(&fl);
 	qdisc_destroy(cl->qdisc);
 	gen_kill_estimator(&cl->bstats, &cl->rate_est);
 	if (cl != &q->root)
@@ -1161,7 +1163,7 @@ hfsc_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 	head = &q->root;
-	tcf = q->root.filter_list;
+	tcf = rcu_dereference_bh(q->root.filter_list);
 	while (tcf && (result = tc_classify(skb, tcf, &res)) >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -1185,7 +1187,7 @@ hfsc_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 			return cl; /* hit leaf class */
 
 		/* apply inner filter chain */
-		tcf = cl->filter_list;
+		tcf = rcu_dereference_bh(cl->filter_list);
 		head = cl;
 	}
 
@@ -1540,11 +1542,14 @@ hfsc_destroy_qdisc(struct Qdisc *sch)
 	struct hfsc_sched *q = qdisc_priv(sch);
 	struct hlist_node *next;
 	struct hfsc_class *cl;
+	struct tcf_proto *fl;
 	unsigned int i;
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
-		hlist_for_each_entry(cl, &q->clhash.hash[i], cl_common.hnode)
-			tcf_destroy_chain(&cl->filter_list);
+		hlist_for_each_entry(cl, &q->clhash.hash[i], cl_common.hnode) {
+			fl = rtnl_dereference(cl->filter_list);
+			tcf_destroy_chain(&fl);
+		}
 	}
 	for (i = 0; i < q->clhash.hashsize; i++) {
 		hlist_for_each_entry_safe(cl, next, &q->clhash.hash[i],

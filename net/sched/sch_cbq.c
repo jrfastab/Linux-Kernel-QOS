@@ -133,7 +133,7 @@ struct cbq_class {
 	struct gnet_stats_rate_est64 rate_est;
 	struct tc_cbq_xstats	xstats;
 
-	struct tcf_proto	*filter_list;
+	struct tcf_proto __rcu	*filter_list;
 
 	int			refcnt;
 	int			filters;
@@ -222,6 +222,7 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 	struct cbq_class **defmap;
 	struct cbq_class *cl = NULL;
 	u32 prio = skb->priority;
+	struct tcf_proto *fl;
 	struct tcf_result res;
 
 	/*
@@ -234,13 +235,15 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 	for (;;) {
 		int result = 0;
+
 		defmap = head->defaults;
 
+		fl = rcu_dereference_bh(head->filter_list);
 		/*
 		 * Step 2+n. Apply classifier.
 		 */
-		if (!head->filter_list ||
-		    (result = tc_classify_compat(skb, head->filter_list, &res)) < 0)
+		result = tc_classify_compat(skb, fl, &res);
+		if (!fl || result < 0)
 			goto fallback;
 
 		cl = (void *)res.class;
@@ -1683,10 +1686,13 @@ static unsigned long cbq_get(struct Qdisc *sch, u32 classid)
 static void cbq_destroy_class(struct Qdisc *sch, struct cbq_class *cl)
 {
 	struct cbq_sched_data *q = qdisc_priv(sch);
+	struct tcf_proto *fl;
 
 	WARN_ON(cl->filters);
 
-	tcf_destroy_chain(&cl->filter_list);
+	fl = rtnl_dereference(cl->filter_list);
+	tcf_destroy_chain(&fl);
+
 	qdisc_destroy(cl->q);
 	qdisc_put_rtab(cl->R_tab);
 	gen_kill_estimator(&cl->bstats, &cl->rate_est);
@@ -1699,6 +1705,7 @@ static void cbq_destroy(struct Qdisc *sch)
 	struct cbq_sched_data *q = qdisc_priv(sch);
 	struct hlist_node *next;
 	struct cbq_class *cl;
+	struct tcf_proto *fl;
 	unsigned int h;
 
 #ifdef CONFIG_NET_CLS_ACT
@@ -1710,8 +1717,10 @@ static void cbq_destroy(struct Qdisc *sch)
 	 * be bound to classes which have been destroyed already. --TGR '04
 	 */
 	for (h = 0; h < q->clhash.hashsize; h++) {
-		hlist_for_each_entry(cl, &q->clhash.hash[h], common.hnode)
-			tcf_destroy_chain(&cl->filter_list);
+		hlist_for_each_entry(cl, &q->clhash.hash[h], common.hnode) {
+			fl = rtnl_dereference(cl->filter_list);
+			tcf_destroy_chain(&fl);
+		}
 	}
 	for (h = 0; h < q->clhash.hashsize; h++) {
 		hlist_for_each_entry_safe(cl, next, &q->clhash.hash[h],

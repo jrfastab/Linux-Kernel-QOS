@@ -103,7 +103,7 @@ struct htb_class {
 	int			prio;		/* these two are used only by leaves... */
 	int			quantum;	/* but stored for parent-to-leaf return */
 
-	struct tcf_proto	*filter_list;	/* class attached filters */
+	struct tcf_proto __rcu	*filter_list;	/* class attached filters */
 	int			filter_cnt;
 	int			refcnt;		/* usage count of this class */
 
@@ -153,7 +153,7 @@ struct htb_sched {
 	int			rate2quantum;	/* quant = rate / rate2quantum */
 
 	/* filters for qdisc itself */
-	struct tcf_proto	*filter_list;
+	struct tcf_proto __rcu	*filter_list;
 
 #define HTB_WARN_TOOMANYEVENTS	0x1
 	unsigned int		warned;	/* only one warning */
@@ -223,7 +223,7 @@ static struct htb_class *htb_classify(struct sk_buff *skb, struct Qdisc *sch,
 		return cl;
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	tcf = q->filter_list;
+	tcf = rcu_dereference_bh(q->filter_list);
 	while (tcf && (result = tc_classify(skb, tcf, &res)) >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -246,7 +246,7 @@ static struct htb_class *htb_classify(struct sk_buff *skb, struct Qdisc *sch,
 			return cl;	/* we hit leaf; return it */
 
 		/* we have got inner class; apply inner filter chain */
-		tcf = cl->filter_list;
+		tcf = rcu_dereference_bh(cl->filter_list);
 	}
 	/* classification failed; try to use default class */
 	cl = htb_find(TC_H_MAKE(TC_H_MAJ(sch->handle), q->defcls), sch);
@@ -1222,12 +1222,15 @@ static void htb_parent_to_leaf(struct htb_sched *q, struct htb_class *cl,
 
 static void htb_destroy_class(struct Qdisc *sch, struct htb_class *cl)
 {
+	struct tcf_proto *fl;
+
 	if (!cl->level) {
 		WARN_ON(!cl->un.leaf.q);
 		qdisc_destroy(cl->un.leaf.q);
 	}
 	gen_kill_estimator(&cl->bstats, &cl->rate_est);
-	tcf_destroy_chain(&cl->filter_list);
+	fl = rtnl_dereference(cl->filter_list);
+	tcf_destroy_chain(&fl);
 	kfree(cl);
 }
 
@@ -1236,6 +1239,7 @@ static void htb_destroy(struct Qdisc *sch)
 	struct htb_sched *q = qdisc_priv(sch);
 	struct hlist_node *next;
 	struct htb_class *cl;
+	struct tcf_proto *fl;
 	unsigned int i;
 
 	cancel_work_sync(&q->work);
@@ -1245,11 +1249,14 @@ static void htb_destroy(struct Qdisc *sch)
 	 * because filter need its target class alive to be able to call
 	 * unbind_filter on it (without Oops).
 	 */
-	tcf_destroy_chain(&q->filter_list);
+	fl = rtnl_dereference(q->filter_list);
+	tcf_destroy_chain(&fl);
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
-		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode)
-			tcf_destroy_chain(&cl->filter_list);
+		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode) {
+			fl = rtnl_dereference(cl->filter_list);
+			tcf_destroy_chain(&fl);
+		}
 	}
 	for (i = 0; i < q->clhash.hashsize; i++) {
 		hlist_for_each_entry_safe(cl, next, &q->clhash.hash[i],

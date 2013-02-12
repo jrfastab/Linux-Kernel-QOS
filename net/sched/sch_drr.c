@@ -35,7 +35,7 @@ struct drr_class {
 
 struct drr_sched {
 	struct list_head		active;
-	struct tcf_proto		*filter_list;
+	struct tcf_proto __rcu		*filter_list;
 	struct Qdisc_class_hash		clhash;
 };
 
@@ -319,6 +319,7 @@ static struct drr_class *drr_classify(struct sk_buff *skb, struct Qdisc *sch,
 	struct drr_sched *q = qdisc_priv(sch);
 	struct drr_class *cl;
 	struct tcf_result res;
+	struct tcf_proto *fl;
 	int result;
 
 	if (TC_H_MAJ(skb->priority ^ sch->handle) == 0) {
@@ -328,7 +329,8 @@ static struct drr_class *drr_classify(struct sk_buff *skb, struct Qdisc *sch,
 	}
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	result = tc_classify(skb, q->filter_list, &res);
+	fl = rcu_dereference_bh(q->filter_list);
+	result = tc_classify(skb, fl, &res);
 	if (result >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -467,9 +469,11 @@ static void drr_destroy_qdisc(struct Qdisc *sch)
 	struct drr_sched *q = qdisc_priv(sch);
 	struct drr_class *cl;
 	struct hlist_node *next;
+	struct tcf_proto *fl;
 	unsigned int i;
 
-	tcf_destroy_chain(&q->filter_list);
+	fl = rtnl_dereference(q->filter_list);
+	tcf_destroy_chain(&fl);
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
 		hlist_for_each_entry_safe(cl, next, &q->clhash.hash[i],

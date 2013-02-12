@@ -212,8 +212,8 @@ struct tcf_proto_ops {
 
 struct tcf_proto {
 	/* Fast access part */
-	struct tcf_proto	*next;
-	void			*root;
+	struct tcf_proto __rcu	*next;
+	void __rcu		*root;
 	int			(*classify)(struct sk_buff *,
 					    const struct tcf_proto *,
 					    struct tcf_result *);
@@ -225,6 +225,7 @@ struct tcf_proto {
 	struct Qdisc		*q;
 	void			*data;
 	const struct tcf_proto_ops	*ops;
+	struct rcu_head		rcu;
 };
 
 struct qdisc_skb_cb {

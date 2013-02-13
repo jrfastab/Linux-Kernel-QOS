@@ -2864,6 +2864,12 @@ int dev_queue_xmit(struct sk_buff *skb)
 
 	skb_update_prio(skb);
 
+#ifdef CONFIG_NET_CLS_ACT
+	q = rcu_dereference_bh(dev->qdisc);
+	if (q && q->pre_enqueue)
+		q->pre_enqueue(skb, q);
+#endif
+
 	txq = netdev_pick_tx(dev, skb);
 	q = rcu_dereference_bh(txq->qdisc);
 

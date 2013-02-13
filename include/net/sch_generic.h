@@ -43,6 +43,8 @@ struct qdisc_size_table {
 };
 
 struct Qdisc {
+	void			(*pre_enqueue)(struct sk_buff *skb,
+					       struct Qdisc *dev);
 	int 			(*enqueue)(struct sk_buff *skb, struct Qdisc *dev);
 	struct sk_buff *	(*dequeue)(struct Qdisc *dev);
 	unsigned int		flags;
@@ -161,6 +163,8 @@ struct Qdisc_ops {
 	char			id[IFNAMSIZ];
 	int			priv_size;
 
+	void			(*pre_enqueue)(struct sk_buff *,
+					       struct Qdisc *);
 	int 			(*enqueue)(struct sk_buff *, struct Qdisc *);
 	struct sk_buff *	(*dequeue)(struct Qdisc *);
 	struct sk_buff *	(*peek)(struct Qdisc *);

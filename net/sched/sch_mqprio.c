@@ -20,6 +20,7 @@
 #include <net/sch_generic.h>
 
 struct mqprio_sched {
+	struct tcf_proto __rcu *filter_list;
 	struct Qdisc		**qdiscs;
 	int hw_owned;
 };
@@ -28,9 +29,14 @@ static void mqprio_destroy(struct Qdisc *sch)
 {
 	struct net_device *dev = qdisc_dev(sch);
 	struct mqprio_sched *priv = qdisc_priv(sch);
+	struct tcf_proto *fl;
 	unsigned int ntx;
 
+
 	if (priv->qdiscs) {
+		fl = rtnl_dereference(priv->filter_list);
+		tcf_destroy_chain(&fl);
+
 		for (ntx = 0;
 		     ntx < dev->num_tx_queues && priv->qdiscs[ntx];
 		     ntx++)
@@ -387,12 +393,40 @@ static void mqprio_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 	}
 }
 
+static struct tcf_proto **mqprio_find_tcf(struct Qdisc *sch, unsigned long cl)
+{
+	struct mqprio_sched *q = qdisc_priv(sch);
+
+	if (cl)
+		return NULL;
+
+	return &q->filter_list;
+}
+
+static unsigned long mqprio_bind(struct Qdisc *sch, unsigned long parent,
+				 u32 classid)
+{
+	return 0;
+}
+
+static void mqprio_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+{
+	struct mqprio_sched *q = qdisc_priv(sch);
+	struct tcf_result res;
+	struct tcf_proto *fl = rcu_dereference_bh(q->filter_list);
+
+	tc_classify(skb, fl, &res);
+}
+
 static const struct Qdisc_class_ops mqprio_class_ops = {
 	.graft		= mqprio_graft,
 	.leaf		= mqprio_leaf,
 	.get		= mqprio_get,
 	.put		= mqprio_put,
 	.walk		= mqprio_walk,
+	.tcf_chain	= mqprio_find_tcf,
+	.bind_tcf	= mqprio_bind,
+	.unbind_tcf	= mqprio_put,
 	.dump		= mqprio_dump_class,
 	.dump_stats	= mqprio_dump_class_stats,
 };
@@ -401,6 +435,7 @@ static struct Qdisc_ops mqprio_qdisc_ops __read_mostly = {
 	.cl_ops		= &mqprio_class_ops,
 	.id		= "mqprio",
 	.priv_size	= sizeof(struct mqprio_sched),
+	.pre_enqueue	= mqprio_enqueue,
 	.init		= mqprio_init,
 	.destroy	= mqprio_destroy,
 	.attach		= mqprio_attach,

@@ -19,6 +19,7 @@
 #include <net/pkt_sched.h>
 
 struct mq_sched {
+	struct tcf_proto __rcu *filter_list;
 	struct Qdisc		**qdiscs;
 };
 
@@ -26,10 +27,16 @@ static void mq_destroy(struct Qdisc *sch)
 {
 	struct net_device *dev = qdisc_dev(sch);
 	struct mq_sched *priv = qdisc_priv(sch);
+	struct tcf_proto *fl;
 	unsigned int ntx;
+
 
 	if (!priv->qdiscs)
 		return;
+
+	fl = rtnl_dereference(priv->filter_list);
+	tcf_destroy_chain(&fl);
+
 	for (ntx = 0; ntx < dev->num_tx_queues && priv->qdiscs[ntx]; ntx++)
 		qdisc_destroy(priv->qdiscs[ntx]);
 	kfree(priv->qdiscs);
@@ -220,6 +227,30 @@ static void mq_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 	}
 }
 
+static struct tcf_proto **mq_find_tcf(struct Qdisc *sch, unsigned long cl)
+{
+	struct mq_sched *q = qdisc_priv(sch);
+
+	if (cl)
+		return NULL;
+
+	return &q->filter_list;
+}
+
+static unsigned long mq_bind(struct Qdisc *sch, unsigned long parent, u32 id)
+{
+	return 0;
+}
+
+static void mq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+{
+	struct mq_sched *q = qdisc_priv(sch);
+	struct tcf_result res;
+	struct tcf_proto *fl = rcu_dereference_bh(q->filter_list);
+
+	tc_classify(skb, fl, &res);
+}
+
 static const struct Qdisc_class_ops mq_class_ops = {
 	.select_queue	= mq_select_queue,
 	.graft		= mq_graft,
@@ -227,6 +258,9 @@ static const struct Qdisc_class_ops mq_class_ops = {
 	.get		= mq_get,
 	.put		= mq_put,
 	.walk		= mq_walk,
+	.tcf_chain	= mq_find_tcf,
+	.bind_tcf	= mq_bind,
+	.unbind_tcf	= mq_put,
 	.dump		= mq_dump_class,
 	.dump_stats	= mq_dump_class_stats,
 };
@@ -235,6 +269,7 @@ struct Qdisc_ops mq_qdisc_ops __read_mostly = {
 	.cl_ops		= &mq_class_ops,
 	.id		= "mq",
 	.priv_size	= sizeof(struct mq_sched),
+	.pre_enqueue	= mq_enqueue,
 	.init		= mq_init,
 	.destroy	= mq_destroy,
 	.attach		= mq_attach,

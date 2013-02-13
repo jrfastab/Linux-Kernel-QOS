@@ -562,6 +562,7 @@ struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 			  dev->qdisc_tx_busylock ?: &qdisc_tx_busylock);
 
 	sch->ops = ops;
+	sch->pre_enqueue = ops->pre_enqueue;
 	sch->enqueue = ops->enqueue;
 	sch->dequeue = ops->dequeue;
 	sch->dev_queue = dev_queue;

@@ -32,10 +32,10 @@
 
 /* The list of all installed classifier types */
 
-static struct tcf_proto_ops *tcf_proto_base __read_mostly;
+static struct tcf_proto_ops __rcu *tcf_proto_base __read_mostly;
 
-/* Protects list of registered TC modules. It is pure SMP lock. */
-static DEFINE_RWLOCK(cls_mod_lock);
+/* Protects list of registered TC modules. */
+static DEFINE_SPINLOCK(cls_mod_lock);
 
 /* Find classifier type by string name */
 
@@ -44,56 +44,65 @@ static const struct tcf_proto_ops *tcf_proto_lookup_ops(struct nlattr *kind)
 	const struct tcf_proto_ops *t = NULL;
 
 	if (kind) {
-		read_lock(&cls_mod_lock);
-		for (t = tcf_proto_base; t; t = t->next) {
+		rcu_read_lock();
+		for (t = rcu_dereference(tcf_proto_base);
+		     t;
+		     t = rcu_dereference(t->next)) {
 			if (nla_strcmp(kind, t->kind) == 0) {
 				if (!try_module_get(t->owner))
 					t = NULL;
 				break;
 			}
 		}
-		read_unlock(&cls_mod_lock);
+		rcu_read_unlock();
 	}
 	return t;
 }
+
+#define rcu_dereference_cls(p)					\
+	rcu_dereference_protected(p, lockdep_is_held(&cls_mod_lock))
 
 /* Register(unregister) new classifier type */
 
 int register_tcf_proto_ops(struct tcf_proto_ops *ops)
 {
-	struct tcf_proto_ops *t, **tp;
+	struct tcf_proto_ops *t, __rcu **tp;
 	int rc = -EEXIST;
 
-	write_lock(&cls_mod_lock);
-	for (tp = &tcf_proto_base; (t = *tp) != NULL; tp = &t->next)
+	spin_lock(&cls_mod_lock);
+	tp = &tcf_proto_base;
+	for (t = rcu_dereference_cls(*tp); t != NULL;
+	     tp = &t->next, t = rcu_dereference_cls(*tp))
 		if (!strcmp(ops->kind, t->kind))
 			goto out;
 
-	ops->next = NULL;
-	*tp = ops;
+	rcu_assign_pointer(ops->next, NULL);
+	rcu_assign_pointer(*tp, ops);
 	rc = 0;
 out:
-	write_unlock(&cls_mod_lock);
+	spin_unlock(&cls_mod_lock);
 	return rc;
 }
 EXPORT_SYMBOL(register_tcf_proto_ops);
 
 int unregister_tcf_proto_ops(struct tcf_proto_ops *ops)
 {
-	struct tcf_proto_ops *t, **tp;
+	struct tcf_proto_ops *t, __rcu **tp;
 	int rc = -ENOENT;
 
-	write_lock(&cls_mod_lock);
-	for (tp = &tcf_proto_base; (t = *tp) != NULL; tp = &t->next)
+	spin_lock(&cls_mod_lock);
+	tp = &tcf_proto_base;
+	for (t = rcu_dereference_cls(tcf_proto_base); t != NULL;
+	     tp = &t->next, t = rcu_dereference_cls(*tp))
 		if (t == ops)
 			break;
 
 	if (!t)
 		goto out;
-	*tp = t->next;
+	rcu_assign_pointer(*tp, t->next);
 	rc = 0;
 out:
-	write_unlock(&cls_mod_lock);
+	spin_unlock(&cls_mod_lock);
 	return rc;
 }
 EXPORT_SYMBOL(unregister_tcf_proto_ops);

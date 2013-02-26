@@ -185,7 +185,7 @@ struct tcf_result {
 };
 
 struct tcf_proto_ops {
-	struct tcf_proto_ops	*next;
+	struct tcf_proto_ops __rcu *next;
 	char			kind[IFNAMSIZ];
 
 	int			(*classify)(struct sk_buff *,

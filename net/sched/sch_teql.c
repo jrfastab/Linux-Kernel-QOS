@@ -100,7 +100,8 @@ teql_dequeue(struct Qdisc *sch)
 	skb = __skb_dequeue(&dat->q);
 	dat_queue = netdev_get_tx_queue(dat->m->dev, 0);
 	if (skb == NULL) {
-		struct net_device *m = qdisc_dev(dat_queue->qdisc);
+		struct Qdisc *q = rcu_dereference_bh(dat_queue->qdisc);
+		struct net_device *m = qdisc_dev(q);
 		if (m) {
 			dat->m->slaves = sch;
 			netif_wake_queue(m);
@@ -157,9 +158,9 @@ teql_destroy(struct Qdisc *sch)
 						txq = netdev_get_tx_queue(master->dev, 0);
 						master->slaves = NULL;
 
-						root_lock = qdisc_root_sleeping_lock(txq->qdisc);
+						root_lock = qdisc_root_sleeping_lock(rtnl_dereference(txq->qdisc));
 						spin_lock_bh(root_lock);
-						qdisc_reset(txq->qdisc);
+						qdisc_reset(rtnl_dereference(txq->qdisc));
 						spin_unlock_bh(root_lock);
 					}
 				}
@@ -266,7 +267,7 @@ static inline int teql_resolve(struct sk_buff *skb,
 	struct dst_entry *dst = skb_dst(skb);
 	int res;
 
-	if (txq->qdisc == &noop_qdisc)
+	if (rcu_dereference_bh(txq->qdisc) == &noop_qdisc)
 		return -ENODEV;
 
 	if (!dev->header_ops || !dst)

@@ -97,7 +97,7 @@ static int tcf_nat_init(struct net *net, struct nlattr *nla, struct nlattr *est,
 
 static int tcf_nat_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_nat *p = a->priv;
+	struct tcf_nat *p = rtnl_dereference(a->priv);
 
 	return tcf_hash_release(&p->common, bind, &nat_hash_info);
 }
@@ -105,7 +105,7 @@ static int tcf_nat_cleanup(struct tc_action *a, int bind)
 static int tcf_nat(struct sk_buff *skb, const struct tc_action *a,
 		   struct tcf_result *res)
 {
-	struct tcf_nat *p = a->priv;
+	struct tcf_nat *p = rcu_dereference_bh(a->priv);
 	struct iphdr *iph;
 	__be32 old_addr;
 	__be32 new_addr;
@@ -270,7 +270,7 @@ static int tcf_nat_dump(struct sk_buff *skb, struct tc_action *a,
 			int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_nat *p = a->priv;
+	struct tcf_nat *p = rtnl_dereference(a->priv);
 	struct tc_nat opt = {
 		.old_addr = p->old_addr,
 		.new_addr = p->new_addr,

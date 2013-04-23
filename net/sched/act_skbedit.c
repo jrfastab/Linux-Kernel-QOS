@@ -42,7 +42,7 @@ static struct tcf_hashinfo skbedit_hash_info = {
 static int tcf_skbedit(struct sk_buff *skb, const struct tc_action *a,
 		       struct tcf_result *res)
 {
-	struct tcf_skbedit *d = a->priv;
+	struct tcf_skbedit *d = rcu_dereference_bh(a->priv);
 
 	spin_lock(&d->tcf_lock);
 	d->tcf_tm.lastuse = jiffies;
@@ -147,7 +147,7 @@ static int tcf_skbedit_init(struct net *net, struct nlattr *nla,
 
 static int tcf_skbedit_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_skbedit *d = a->priv;
+	struct tcf_skbedit *d = rtnl_dereference(a->priv);
 
 	if (d)
 		return tcf_hash_release(&d->common, bind, &skbedit_hash_info);
@@ -158,7 +158,7 @@ static int tcf_skbedit_dump(struct sk_buff *skb, struct tc_action *a,
 			    int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_skbedit *d = a->priv;
+	struct tcf_skbedit *d = rtnl_dereference(a->priv);
 	struct tc_skbedit opt = {
 		.index   = d->tcf_index,
 		.refcnt  = d->tcf_refcnt - ref,

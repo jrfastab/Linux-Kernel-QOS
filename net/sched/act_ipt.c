@@ -196,7 +196,7 @@ err1:
 
 static int tcf_ipt_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_ipt *ipt = a->priv;
+	struct tcf_ipt *ipt = rtnl_dereference(a->priv);
 	return tcf_ipt_release(ipt, bind);
 }
 
@@ -204,7 +204,7 @@ static int tcf_ipt(struct sk_buff *skb, const struct tc_action *a,
 		   struct tcf_result *res)
 {
 	int ret = 0, result = 0;
-	struct tcf_ipt *ipt = a->priv;
+	struct tcf_ipt *ipt = rcu_dereference_bh(a->priv);
 	struct xt_action_param par;
 
 	if (skb_unclone(skb, GFP_ATOMIC))
@@ -251,7 +251,7 @@ static int tcf_ipt(struct sk_buff *skb, const struct tc_action *a,
 static int tcf_ipt_dump(struct sk_buff *skb, struct tc_action *a, int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_ipt *ipt = a->priv;
+	struct tcf_ipt *ipt = rtnl_dereference(a->priv);
 	struct xt_entry_target *t;
 	struct tcf_t tm;
 	struct tc_cnt c;

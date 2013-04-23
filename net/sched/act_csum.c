@@ -100,7 +100,7 @@ static int tcf_csum_init(struct net *n, struct nlattr *nla, struct nlattr *est,
 
 static int tcf_csum_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_csum *p = a->priv;
+	struct tcf_csum *p = rtnl_dereference(a->priv);
 	return tcf_hash_release(&p->common, bind, &csum_hash_info);
 }
 
@@ -513,7 +513,7 @@ fail:
 static int tcf_csum(struct sk_buff *skb,
 		    const struct tc_action *a, struct tcf_result *res)
 {
-	struct tcf_csum *p = a->priv;
+	struct tcf_csum *p = rcu_dereference(a->priv);
 	int action;
 	u32 update_flags;
 
@@ -551,7 +551,7 @@ static int tcf_csum_dump(struct sk_buff *skb,
 			 struct tc_action *a, int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_csum *p = a->priv;
+	struct tcf_csum *p = rtnl_dereference(a->priv);
 	struct tc_csum opt = {
 		.update_flags = p->update_flags,
 		.index   = p->tcf_index,

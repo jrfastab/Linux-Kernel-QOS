@@ -127,7 +127,7 @@ static int tcf_gact_init(struct net *net, struct nlattr *nla,
 
 static int tcf_gact_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_gact *gact = a->priv;
+	struct tcf_gact *gact = rtnl_dereference(a->priv);
 
 	if (gact)
 		return tcf_hash_release(&gact->common, bind, &gact_hash_info);
@@ -137,7 +137,7 @@ static int tcf_gact_cleanup(struct tc_action *a, int bind)
 static int tcf_gact(struct sk_buff *skb, const struct tc_action *a,
 		    struct tcf_result *res)
 {
-	struct tcf_gact *gact = a->priv;
+	struct tcf_gact *gact = rcu_dereference_bh(a->priv);
 	int action = TC_ACT_SHOT;
 
 	spin_lock(&gact->tcf_lock);
@@ -162,7 +162,7 @@ static int tcf_gact(struct sk_buff *skb, const struct tc_action *a,
 static int tcf_gact_dump(struct sk_buff *skb, struct tc_action *a, int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_gact *gact = a->priv;
+	struct tcf_gact *gact = rtnl_dereference(a->priv);
 	struct tc_gact opt = {
 		.index   = gact->tcf_index,
 		.refcnt  = gact->tcf_refcnt - ref,

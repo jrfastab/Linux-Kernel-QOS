@@ -62,7 +62,7 @@ tcf_unbind_filter(struct tcf_proto *tp, struct tcf_result *r)
 
 struct tcf_exts {
 #ifdef CONFIG_NET_CLS_ACT
-	struct tc_action *action;
+	struct tc_action __rcu *action;
 #endif
 };
 
@@ -85,7 +85,8 @@ static inline int
 tcf_exts_is_predicative(struct tcf_exts *exts)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	return !!exts->action;
+	struct tc_action *predicative = rcu_dereference_bh(exts->action);
+	return !!predicative;
 #else
 	return 0;
 #endif
@@ -120,8 +121,10 @@ tcf_exts_exec(struct sk_buff *skb, struct tcf_exts *exts,
 	       struct tcf_result *res)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (exts->action)
-		return tcf_action_exec(skb, exts->action, res);
+	struct tc_action *act = rcu_dereference_bh(exts->action);
+
+	if (act)
+		return tcf_action_exec(skb, act, res);
 #endif
 	return 0;
 }

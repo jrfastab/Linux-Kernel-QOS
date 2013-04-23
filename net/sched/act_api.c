@@ -88,7 +88,7 @@ static int tcf_dump_walker(struct sk_buff *skb, struct netlink_callback *cb,
 			index++;
 			if (index < s_i)
 				continue;
-			a->priv = p;
+			rcu_assign_pointer(a->priv, p);
 			a->order = n_i;
 
 			nest = nla_nest_start(skb, a->order);
@@ -201,7 +201,7 @@ int tcf_hash_search(struct tc_action *a, u32 index)
 	struct tcf_common *p = tcf_hash_lookup(index, hinfo);
 
 	if (p) {
-		a->priv = p;
+		rcu_assign_pointer(a->priv, p);
 		return 1;
 	}
 	return 0;
@@ -216,7 +216,7 @@ struct tcf_common *tcf_hash_check(u32 index, struct tc_action *a, int bind,
 		if (bind)
 			p->tcfc_bindcnt++;
 		p->tcfc_refcnt++;
-		a->priv = p;
+		rcu_assign_pointer(a->priv, p);
 	}
 	return p;
 }
@@ -247,7 +247,7 @@ struct tcf_common *tcf_hash_create(u32 index, struct nlattr *est,
 		}
 	}
 
-	a->priv = (void *) p;
+	rcu_assign_pointer(a->priv, p);
 	return p;
 }
 EXPORT_SYMBOL(tcf_hash_create);
@@ -393,7 +393,7 @@ repeat:
 			if (ret != TC_ACT_PIPE)
 				goto exec_done;
 		}
-		act = a->next;
+		act = rcu_dereference_bh(a->next);
 	}
 exec_done:
 	return ret;
@@ -406,15 +406,15 @@ void tcf_action_destroy(struct tc_action *act, int bind)
 
 	for (a = act; a; a = act) {
 		if (a->ops && a->ops->cleanup) {
+			act = rtnl_dereference(act->next);
 			if (a->ops->cleanup(a, bind) == ACT_P_DELETED)
 				module_put(a->ops->owner);
-			act = act->next;
-			kfree(a);
+			kfree_rcu(a, rcu);
 		} else {
 			/*FIXME: Remove later - catch insertion bugs*/
 			WARN(1, "tcf_action_destroy: BUG? destroying NULL ops\n");
-			act = act->next;
-			kfree(a);
+			act = rtnl_dereference(act->next);
+			kfree_rcu(a, rcu);
 		}
 	}
 }
@@ -466,7 +466,7 @@ tcf_action_dump(struct sk_buff *skb, struct tc_action *act, int bind, int ref)
 	struct nlattr *nest;
 
 	while ((a = act) != NULL) {
-		act = a->next;
+		act = rtnl_dereference(a->next);
 		nest = nla_nest_start(skb, a->order);
 		if (nest == NULL)
 			goto nla_put_failure;
@@ -589,7 +589,7 @@ struct tc_action *tcf_action_init(struct net *net, struct nlattr *nla,
 		if (head == NULL)
 			head = act;
 		else
-			act_prev->next = act;
+			rcu_assign_pointer(act_prev->next, act);
 		act_prev = act;
 	}
 	return head;
@@ -605,7 +605,7 @@ int tcf_action_copy_stats(struct sk_buff *skb, struct tc_action *a,
 {
 	int err = 0;
 	struct gnet_dump d;
-	struct tcf_act_hdr *h = a->priv;
+	struct tcf_act_hdr *h = rtnl_dereference(a->priv);
 
 	if (h == NULL)
 		goto errout;
@@ -745,8 +745,8 @@ static void cleanup_a(struct tc_action *act)
 	struct tc_action *a;
 
 	for (a = act; a; a = act) {
-		act = a->next;
-		kfree(a);
+		act = rtnl_dereference(a->next);
+		kfree_rcu(a, rcu);
 	}
 }
 
@@ -871,7 +871,7 @@ tca_action_gd(struct net *net, struct nlattr *nla, struct nlmsghdr *n,
 		if (head == NULL)
 			head = act;
 		else
-			act_prev->next = act;
+			rcu_assign_pointer(act_prev->next, act);
 		act_prev = act;
 	}
 
@@ -975,8 +975,8 @@ tcf_action_add(struct net *net, struct nlattr *nla, struct nlmsghdr *n,
 	 */
 	ret = tcf_add_notify(net, act, portid, seq, RTM_NEWACTION, n->nlmsg_flags);
 	for (a = act; a; a = act) {
-		act = a->next;
-		kfree(a);
+		act = rtnl_dereference(a->next);
+		kfree_rcu(a, rcu);
 	}
 done:
 	return ret;

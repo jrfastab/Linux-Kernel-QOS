@@ -112,7 +112,7 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 
 static int tcf_pedit_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_pedit *p = a->priv;
+	struct tcf_pedit *p = rtnl_dereference(a->priv);
 
 	if (p) {
 		struct tc_pedit_key *keys = p->tcfp_keys;
@@ -127,7 +127,7 @@ static int tcf_pedit_cleanup(struct tc_action *a, int bind)
 static int tcf_pedit(struct sk_buff *skb, const struct tc_action *a,
 		     struct tcf_result *res)
 {
-	struct tcf_pedit *p = a->priv;
+	struct tcf_pedit *p = rcu_dereference_bh(a->priv);
 	int i, munged = 0;
 	unsigned int off;
 
@@ -197,7 +197,7 @@ static int tcf_pedit_dump(struct sk_buff *skb, struct tc_action *a,
 			  int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_pedit *p = a->priv;
+	struct tcf_pedit *p = rtnl_dereference(a->priv);
 	struct tc_pedit *opt;
 	struct tcf_t t;
 	int s;

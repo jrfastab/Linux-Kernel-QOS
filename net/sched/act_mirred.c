@@ -148,7 +148,7 @@ static int tcf_mirred_init(struct net *net, struct nlattr *nla,
 
 static int tcf_mirred_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_mirred *m = a->priv;
+	struct tcf_mirred *m = rtnl_dereference(a->priv);
 
 	if (m)
 		return tcf_mirred_release(m, bind);
@@ -158,7 +158,7 @@ static int tcf_mirred_cleanup(struct tc_action *a, int bind)
 static int tcf_mirred(struct sk_buff *skb, const struct tc_action *a,
 		      struct tcf_result *res)
 {
-	struct tcf_mirred *m = a->priv;
+	struct tcf_mirred *m = rcu_dereference_bh(a->priv);
 	struct net_device *dev;
 	struct sk_buff *skb2;
 	u32 at;
@@ -215,7 +215,7 @@ out:
 static int tcf_mirred_dump(struct sk_buff *skb, struct tc_action *a, int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_mirred *m = a->priv;
+	struct tcf_mirred *m = rtnl_dereference(a->priv);
 	struct tc_mirred opt = {
 		.index   = m->tcf_index,
 		.action  = m->tcf_action,

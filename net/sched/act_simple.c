@@ -39,7 +39,7 @@ static struct tcf_hashinfo simp_hash_info = {
 static int tcf_simp(struct sk_buff *skb, const struct tc_action *a,
 		    struct tcf_result *res)
 {
-	struct tcf_defact *d = a->priv;
+	struct tcf_defact *d = rcu_dereference_bh(a->priv);
 
 	spin_lock(&d->tcf_lock);
 	d->tcf_tm.lastuse = jiffies;
@@ -156,7 +156,7 @@ static int tcf_simp_init(struct net *net, struct nlattr *nla,
 
 static int tcf_simp_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_defact *d = a->priv;
+	struct tcf_defact *d = rtnl_dereference(a->priv);
 
 	if (d)
 		return tcf_simp_release(d, bind);
@@ -167,7 +167,7 @@ static int tcf_simp_dump(struct sk_buff *skb, struct tc_action *a,
 			 int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_defact *d = a->priv;
+	struct tcf_defact *d = rtnl_dereference(a->priv);
 	struct tc_defact opt = {
 		.index   = d->tcf_index,
 		.refcnt  = d->tcf_refcnt - ref,

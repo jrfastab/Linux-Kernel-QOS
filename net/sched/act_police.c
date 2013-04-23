@@ -82,7 +82,7 @@ static int tcf_act_police_walker(struct sk_buff *skb, struct netlink_callback *c
 			index++;
 			if (index < s_i)
 				continue;
-			a->priv = p;
+			rcu_assign_pointer(a->priv, p);
 			a->order = index;
 			nest = nla_nest_start(skb, a->order);
 			if (nest == NULL)
@@ -172,7 +172,7 @@ static int tcf_act_police_locate(struct net *net, struct nlattr *nla,
 
 		pc = tcf_hash_lookup(parm->index, &police_hash_info);
 		if (pc != NULL) {
-			a->priv = pc;
+			rcu_assign_pointer(a->priv, pc);
 			police = to_police(pc);
 			if (bind) {
 				police->tcf_bindcnt += 1;
@@ -271,7 +271,7 @@ override:
 	tcf_police_ht[h] = &police->common;
 	write_unlock_bh(&police_lock);
 
-	a->priv = police;
+	rcu_assign_pointer(a->priv, police);
 	return ret;
 
 failure_unlock:
@@ -288,7 +288,7 @@ failure:
 
 static int tcf_act_police_cleanup(struct tc_action *a, int bind)
 {
-	struct tcf_police *p = a->priv;
+	struct tcf_police *p = rcu_dereference_bh(a->priv);
 	int ret = 0;
 
 	if (p != NULL) {
@@ -307,7 +307,7 @@ static int tcf_act_police_cleanup(struct tc_action *a, int bind)
 static int tcf_act_police(struct sk_buff *skb, const struct tc_action *a,
 			  struct tcf_result *res)
 {
-	struct tcf_police *police = a->priv;
+	struct tcf_police *police = rcu_dereference_bh(a->priv);
 	s64 now;
 	s64 toks;
 	s64 ptoks = 0;
@@ -365,7 +365,7 @@ static int
 tcf_act_police_dump(struct sk_buff *skb, struct tc_action *a, int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_police *police = a->priv;
+	struct tcf_police *police = rcu_dereference_bh(a->priv);
 	struct tc_police opt = {
 		.index = police->tcf_index,
 		.action = police->tcf_action,

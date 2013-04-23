@@ -56,11 +56,12 @@ struct tcf_act_hdr {
 };
 
 struct tc_action {
-	void			*priv;
+	void __rcu		*priv;
 	const struct tc_action_ops	*ops;
 	__u32			type; /* for backward compat(TCA_OLD_COMPAT) */
 	__u32			order;
-	struct tc_action	*next;
+	struct tc_action __rcu	*next;
+	struct rcu_head		rcu;
 };
 
 #define TCA_CAP_NONE 0

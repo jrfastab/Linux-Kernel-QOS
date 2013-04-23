@@ -507,9 +507,11 @@ out:
 void tcf_exts_destroy(struct tcf_proto *tp, struct tcf_exts *exts)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (exts->action) {
-		tcf_action_destroy(exts->action, TCA_ACT_UNBIND);
-		exts->action = NULL;
+	struct tc_action *action = rtnl_dereference(exts->action);
+
+	if (action) {
+		tcf_action_destroy(action, TCA_ACT_UNBIND);
+		rcu_assign_pointer(exts->action, NULL);
 	}
 #endif
 }
@@ -533,7 +535,7 @@ int tcf_exts_validate(struct net *net, struct tcf_proto *tp, struct nlattr **tb,
 				return PTR_ERR(act);
 
 			act->type = TCA_OLD_COMPAT;
-			exts->action = act;
+			rcu_assign_pointer(exts->action, act);
 		} else if (map->action && tb[map->action]) {
 			act = tcf_action_init(net, tb[map->action], rate_tlv,
 					      NULL, TCA_ACT_NOREPLACE,
@@ -541,7 +543,7 @@ int tcf_exts_validate(struct net *net, struct tcf_proto *tp, struct nlattr **tb,
 			if (IS_ERR(act))
 				return PTR_ERR(act);
 
-			exts->action = act;
+			rcu_assign_pointer(exts->action, act);
 		}
 	}
 #else
@@ -558,12 +560,11 @@ void tcf_exts_change(struct tcf_proto *tp, struct tcf_exts *dst,
 		     struct tcf_exts *src)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (src->action) {
-		struct tc_action *act;
-		tcf_tree_lock(tp);
-		act = dst->action;
-		dst->action = src->action;
-		tcf_tree_unlock(tp);
+	struct tc_action *src_act = rtnl_dereference(src->action);
+	if (src_act) {
+		struct tc_action *act = rtnl_dereference(dst->action);
+
+		rcu_assign_pointer(dst->action, src->action);
 		if (act)
 			tcf_action_destroy(act, TCA_ACT_UNBIND);
 	}
@@ -575,7 +576,9 @@ int tcf_exts_dump(struct sk_buff *skb, struct tcf_exts *exts,
 		  const struct tcf_ext_map *map)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (map->action && exts->action) {
+	struct tc_action *act = rtnl_dereference(exts->action);
+
+	if (map->action && act) {
 		/*
 		 * again for backward compatible mode - we want
 		 * to work with both old and new modes of entering
@@ -583,18 +586,18 @@ int tcf_exts_dump(struct sk_buff *skb, struct tcf_exts *exts,
 		 */
 		struct nlattr *nest;
 
-		if (exts->action->type != TCA_OLD_COMPAT) {
+		if (act->type != TCA_OLD_COMPAT) {
 			nest = nla_nest_start(skb, map->action);
 			if (nest == NULL)
 				goto nla_put_failure;
-			if (tcf_action_dump(skb, exts->action, 0, 0) < 0)
+			if (tcf_action_dump(skb, act, 0, 0) < 0)
 				goto nla_put_failure;
 			nla_nest_end(skb, nest);
 		} else if (map->police) {
 			nest = nla_nest_start(skb, map->police);
 			if (nest == NULL)
 				goto nla_put_failure;
-			if (tcf_action_dump_old(skb, exts->action, 0, 0) < 0)
+			if (tcf_action_dump_old(skb, act, 0, 0) < 0)
 				goto nla_put_failure;
 			nla_nest_end(skb, nest);
 		}
@@ -611,8 +614,9 @@ int tcf_exts_dump_stats(struct sk_buff *skb, struct tcf_exts *exts,
 			const struct tcf_ext_map *map)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (exts->action)
-		if (tcf_action_copy_stats(skb, exts->action, 1) < 0)
+	struct tc_action *act = rtnl_dereference(exts->action);
+	if (act)
+		if (tcf_action_copy_stats(skb, act, 1) < 0)
 			goto nla_put_failure;
 #endif
 	return 0;

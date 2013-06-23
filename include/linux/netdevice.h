@@ -574,6 +574,7 @@ struct netdev_queue {
 #ifdef CONFIG_BQL
 	struct dql		dql;
 #endif
+	u32			rate_limit;
 } ____cacheline_aligned_in_smp;
 
 static inline int netdev_queue_numa_node_read(const struct netdev_queue *q)
@@ -948,6 +949,16 @@ struct netdev_phys_port_id {
  *	Called to get ID of physical port of this device. If driver does
  *	not implement this, it is assumed that the hw is not able to have
  *	multiple net devices on single physical port.
+ *
+ * int (*ndo_set_ratelimit)(struct net_device *dev,
+ *			    int queue_index, u32 *maxrate)
+ *	Called to set the rate limit in Mpbs of the specified queue_index
+ *	setting the limit to maxrate. It is expected that hardware may
+ *	quantize the rate limits. In these cases the driver should guarantee the
+ *	specified maxrate is not exceeded and return the set value in maxrate.
+ *	Zero should be returned on success otherwise use appropriate error code.
+ *	Drivers must handle any updates required with link speed changes within
+ *	normal driver code paths.
  */
 struct net_device_ops {
 	int			(*ndo_init)(struct net_device *dev);
@@ -1078,6 +1089,9 @@ struct net_device_ops {
 						      bool new_carrier);
 	int			(*ndo_get_phys_port_id)(struct net_device *dev,
 							struct netdev_phys_port_id *ppid);
+	int			(*ndo_set_ratelimit)(struct net_device *dev,
+						     int queue_index,
+						     u32 *max_rate);
 };
 
 /*

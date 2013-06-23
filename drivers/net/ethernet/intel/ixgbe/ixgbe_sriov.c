@@ -1140,17 +1140,14 @@ static int ixgbe_link_mbps(struct ixgbe_adapter *adapter)
 	}
 }
 
-static void ixgbe_set_vf_rate_limit(struct ixgbe_adapter *adapter, int vf)
+static u32 ixgbe_bcnrc_from_rate(struct ixgbe_adapter *adapter,
+				 u16 tx_rate, int link_speed)
 {
-	struct ixgbe_ring_feature *vmdq = &adapter->ring_feature[RING_F_VMDQ];
-	struct ixgbe_hw *hw = &adapter->hw;
 	u32 bcnrc_val = 0;
-	u16 queue, queues_per_pool;
-	u16 tx_rate = adapter->vfinfo[vf].tx_rate;
 
 	if (tx_rate) {
 		/* start with base link speed value */
-		bcnrc_val = adapter->vf_rate_link_speed;
+		bcnrc_val = link_speed;
 
 		/* Calculate the rate factor values to set */
 		bcnrc_val <<= IXGBE_RTTBCNRC_RF_INT_SHIFT;
@@ -1164,6 +1161,11 @@ static void ixgbe_set_vf_rate_limit(struct ixgbe_adapter *adapter, int vf)
 		bcnrc_val |= IXGBE_RTTBCNRC_RS_ENA;
 	}
 
+	return bcnrc_val;
+}
+
+static void ixgbe_set_xmit_compensation(struct ixgbe_hw *hw)
+{
 	/*
 	 * Set global transmit compensation time to the MMW_SIZE in RTTBCNRM
 	 * register. Typically MMW_SIZE=0x014 if 9728-byte jumbo is supported
@@ -1179,6 +1181,39 @@ static void ixgbe_set_vf_rate_limit(struct ixgbe_adapter *adapter, int vf)
 	default:
 		break;
 	}
+}
+
+int ixgbe_set_rate_limit(struct net_device *dev, int index, u32 *tx_rate)
+{
+	struct ixgbe_adapter *a = netdev_priv(dev);
+	struct ixgbe_hw *hw = &a->hw;
+	int linkspeed = ixgbe_link_mbps(a);
+	u8 reg_idx = a->tx_ring[index]->reg_idx;
+	u32 bcnrc = ixgbe_bcnrc_from_rate(a, *tx_rate, linkspeed);
+
+	/* rate limit cannot be less than 10Mbs */
+	if (*tx_rate && (*tx_rate <= 10))
+		return -EINVAL;
+
+	ixgbe_set_xmit_compensation(hw);
+
+	IXGBE_WRITE_REG(hw, IXGBE_RTTDQSEL, reg_idx);
+	IXGBE_WRITE_REG(hw, IXGBE_RTTBCNRC, bcnrc);
+
+	return 0;
+}
+
+static void ixgbe_set_vf_rate_limit(struct ixgbe_adapter *adapter, int vf)
+{
+	struct ixgbe_ring_feature *vmdq = &adapter->ring_feature[RING_F_VMDQ];
+	struct ixgbe_hw *hw = &adapter->hw;
+	u32 bcnrc_val = 0;
+	u16 queue, queues_per_pool;
+	u16 tx_rate = adapter->vfinfo[vf].tx_rate;
+
+	bcnrc_val = ixgbe_bcnrc_from_rate(adapter, tx_rate,
+					  adapter->vf_rate_link_speed);
+	ixgbe_set_xmit_compensation(hw);
 
 	/* determine how many queues per pool based on VMDq mask */
 	queues_per_pool = __ALIGN_MASK(1, ~vmdq->mask);

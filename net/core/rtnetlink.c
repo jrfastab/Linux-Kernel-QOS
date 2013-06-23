@@ -865,6 +865,45 @@ static int rtnl_phys_port_id_fill(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
+static int rtnl_queue_fill(struct sk_buff *skb, struct net_device *dev)
+{
+	int i;
+	struct nlattr *attribs, *attrib = NULL;
+
+	attribs = nla_nest_start(skb, IFLA_TXQUEUE_ATTRIBS);
+	if (!attribs)
+		return -EMSGSIZE;
+
+	for (i = 0; i < dev->real_num_tx_queues; i++) {
+		struct netdev_queue *q = netdev_get_tx_queue(dev, i);
+
+		if (!q->rate_limit)
+			continue;
+
+		attrib = nla_nest_start(skb, IFLA_TXQUEUE_ATTRIB);
+		if (!attrib) {
+			nla_nest_cancel(skb, attribs);
+			return -EMSGSIZE;
+		}
+
+		if (nla_put_u32(skb, IFLA_TXQUEUE_INDEX, i) ||
+		    nla_put_u32(skb, IFLA_TXQUEUE_RATE, q->rate_limit)) {
+			nla_nest_cancel(skb, attrib);
+			nla_nest_cancel(skb, attribs);
+			return -EMSGSIZE;
+		}
+
+		nla_nest_end(skb, attrib);
+	}
+
+	if (attrib)
+		nla_nest_end(skb, attribs);
+	else
+		nla_nest_cancel(skb, attribs);
+
+	return 0;
+}
+
 static int rtnl_fill_ifinfo(struct sk_buff *skb, struct net_device *dev,
 			    int type, u32 pid, u32 seq, u32 change,
 			    unsigned int flags, u32 ext_filter_mask)
@@ -1019,6 +1058,9 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb, struct net_device *dev,
 	if (rtnl_port_fill(skb, dev))
 		goto nla_put_failure;
 
+	if (rtnl_queue_fill(skb, dev))
+		goto nla_put_failure;
+
 	if (dev->rtnl_link_ops) {
 		if (rtnl_link_fill(skb, dev) < 0)
 			goto nla_put_failure;
@@ -1171,6 +1213,11 @@ static const struct nla_policy ifla_port_policy[IFLA_PORT_MAX+1] = {
 				    .len = PORT_UUID_MAX },
 	[IFLA_PORT_REQUEST]	= { .type = NLA_U8, },
 	[IFLA_PORT_RESPONSE]	= { .type = NLA_U16, },
+};
+
+static const struct nla_policy ifla_txqueue_policy[IFLA_TXQUEUE_MAX+1] = {
+	[IFLA_TXQUEUE_INDEX]	= { .type = NLA_U32 },
+	[IFLA_TXQUEUE_RATE]	= { .type = NLA_U32 },
 };
 
 struct net *rtnl_link_get_net(struct net *src_net, struct nlattr *tb[])
@@ -1525,6 +1572,49 @@ static int do_setlink(struct net_device *dev, struct ifinfomsg *ifm,
 		if (err < 0)
 			goto errout;
 		modified = 1;
+	}
+	if (tb[IFLA_TXQUEUE_ATTRIBS]) {
+		struct nlattr *attr;
+		int rem;
+
+		nla_for_each_nested(attr, tb[IFLA_TXQUEUE_ATTRIBS], rem) {
+			struct nlattr *queue[IFLA_TXQUEUE_MAX+1];
+			struct netdev_queue *q = NULL;
+			unsigned int qindex, qrate;
+
+			if (nla_type(attr) != IFLA_TXQUEUE_ATTRIB)
+				continue;
+
+			err = nla_parse_nested(queue, IFLA_TXQUEUE_MAX,
+					       attr, ifla_txqueue_policy);
+			if  (err < 0)
+				goto errout;
+
+			err = -EINVAL;
+			if (queue[IFLA_TXQUEUE_INDEX]) {
+				qindex = nla_get_u32(queue[IFLA_TXQUEUE_INDEX]);
+				if (qindex >= dev->real_num_tx_queues)
+					goto errout;
+
+				q = netdev_get_tx_queue(dev, qindex);
+			} else {
+				goto errout;
+			}
+
+			err = -EOPNOTSUPP;
+			if (queue[IFLA_TXQUEUE_RATE]) {
+				if (!ops->ndo_set_ratelimit)
+					goto errout;
+
+				qrate = nla_get_u32(queue[IFLA_TXQUEUE_RATE]);
+				err = ops->ndo_set_ratelimit(dev,
+							     qindex, &qrate);
+				if (err < 0)
+					goto errout;
+				q->rate_limit = qrate;
+				modified = 1;
+			}
+		}
 	}
 
 	if (tb[IFLA_AF_SPEC]) {

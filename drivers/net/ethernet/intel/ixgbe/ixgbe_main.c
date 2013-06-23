@@ -5666,6 +5666,19 @@ static void ixgbe_check_hang_subtask(struct ixgbe_adapter *adapter)
 
 }
 
+static void ixgbe_reset_rate_limits(struct ixgbe_adapter *adapter)
+{
+	struct net_device *dev = adapter->netdev;
+	int i;
+
+	for (i = 0; i < dev->real_num_tx_queues; i++) {
+		struct netdev_queue *q = netdev_get_tx_queue(dev, i);
+		u32 rate = q->rate_limit;
+
+		ixgbe_set_rate_limit(adapter->netdev, i, &rate);
+	}
+}
+
 /**
  * ixgbe_watchdog_update_link - update the link status
  * @adapter: pointer to the device adapter structure
@@ -5707,6 +5720,8 @@ static void ixgbe_watchdog_update_link(struct ixgbe_adapter *adapter)
 
 	adapter->link_up = link_up;
 	adapter->link_speed = link_speed;
+
+	ixgbe_reset_rate_limits(adapter);
 }
 
 static void ixgbe_update_default_up(struct ixgbe_adapter *adapter)
@@ -7327,6 +7342,7 @@ static const struct net_device_ops ixgbe_netdev_ops = {
 	.ndo_fdb_add		= ixgbe_ndo_fdb_add,
 	.ndo_bridge_setlink	= ixgbe_ndo_bridge_setlink,
 	.ndo_bridge_getlink	= ixgbe_ndo_bridge_getlink,
+	.ndo_set_ratelimit	= ixgbe_set_rate_limit,
 };
 
 /**

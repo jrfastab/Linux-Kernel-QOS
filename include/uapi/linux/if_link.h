@@ -144,6 +144,7 @@ enum {
 	IFLA_NUM_RX_QUEUES,
 	IFLA_CARRIER,
 	IFLA_PHYS_PORT_ID,
+	IFLA_TXQUEUE_ATTRIBS,
 	__IFLA_MAX
 };
 
@@ -450,6 +451,29 @@ struct ifla_port_vsi {
 	__u8 pad[3];
 };
 
+/* Queue Attributes management
+ *	Nested layout of queue attributes is:
+ *	[IFLA_TXQUEUE_ATTRIBS]
+ *		[IFLA_TXQUEUE_ATTRIB]
+ *			[IFLA_TXQUEUE_INDEX]	<required>
+ *			[IFLA_TXQUEUE_RATE]	<optional>
+ *		[IFLA_TXQUEUE_ATTRIB]
+ *			[...]
+ */
+enum {
+	IFLA_TXQUEUE_ATTRIB_UNSPEC,
+	IFLA_TXQUEUE_ATTRIB,			/* nest */
+	__IFLA_TXQUEUE_ATTRIB_MAX,
+};
+#define IFLA_TXQUEUE_ATTRIB_MAX (__IFLA_TXQUEUE_ATTRIB_MAX - 1)
+
+enum {
+	IFLA_TXQUEUE_UNSPEC,
+	IFLA_TXQUEUE_INDEX,		/* __u32 */
+	IFLA_TXQUEUE_RATE,		/* __u32 */
+	__IFLA_TXQUEUE_MAX,
+};
+#define IFLA_TXQUEUE_MAX (__IFLA_TXQUEUE_MAX - 1)
 
 /* IPoIB section */
 

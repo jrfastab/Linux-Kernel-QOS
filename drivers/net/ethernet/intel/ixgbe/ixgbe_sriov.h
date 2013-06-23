@@ -56,5 +56,7 @@ static inline void ixgbe_set_vmvir(struct ixgbe_adapter *adapter,
 	IXGBE_WRITE_REG(hw, IXGBE_VMVIR(vf), vmvir);
 }
 
+int ixgbe_set_rate_limit(struct net_device *dev, int index, u32 *tx_rate);
+
 #endif /* _IXGBE_SRIOV_H_ */
 
